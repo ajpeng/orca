@@ -123,6 +123,29 @@ describe('AgentBrowserBridge keypress input', () => {
     ])
   })
 
+  it('focuses the page before dispatching so the key cannot land in a focused terminal', async () => {
+    await bridge.keypress('Escape', undefined, 'tab-1')
+
+    expect(wc.focus).toHaveBeenCalledTimes(1)
+    const [firstDispatchOrder] = wc.debugger.sendCommand.mock.invocationCallOrder
+    expect(wc.focus.mock.invocationCallOrder[0]).toBeLessThan(firstDispatchOrder)
+  })
+
+  it('focuses the page before handing an unmapped key to agent-browser', async () => {
+    succeedWith({ pressed: 'MediaPlayPause' })
+
+    await bridge.keypress('MediaPlayPause', undefined, 'tab-1')
+
+    const pressCallIndex = execFileMock.mock.calls.findIndex(([, commandArgs]) =>
+      isStringArray(commandArgs) ? commandArgs.includes('press') : false
+    )
+    expect(pressCallIndex).toBeGreaterThanOrEqual(0)
+    expect(wc.focus).toHaveBeenCalledTimes(1)
+    expect(wc.focus.mock.invocationCallOrder[0]).toBeLessThan(
+      execFileMock.mock.invocationCallOrder[pressCallIndex]
+    )
+  })
+
   it('types & as shifted 7 instead of colliding with the ArrowUp virtual key code', async () => {
     await bridge.keypress('&', undefined, 'tab-1')
 

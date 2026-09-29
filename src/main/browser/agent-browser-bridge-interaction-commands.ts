@@ -182,6 +182,10 @@ export abstract class AgentBrowserBridgeInteractionCommands extends AgentBrowser
           // report success — route it to the helper, creating its session only now so
           // the direct path never pays for it.
           await this.ensureSession(sessionName, target.browserPageId, target.webContentsId)
+          const helperWc = this.getWebContents(target.webContentsId)
+          if (helperWc && !helperWc.isDestroyed()) {
+            helperWc.focus()
+          }
           return (await this.execAgentBrowser(sessionName, ['press', key])) as BrowserKeypressResult
         }
         const wc = this.getWebContents(target.webContentsId)
@@ -202,6 +206,9 @@ export abstract class AgentBrowserBridgeInteractionCommands extends AgentBrowser
         let releaseDebugger = (): void => {}
         try {
           releaseDebugger = acquireElectronDebugger(wc).release
+          // Why: a key sent to an unfocused guest lands in whatever the Orca window has focused,
+          // usually a terminal, so the agent that ran keypress types into its own PTY.
+          wc.focus()
           await wc.debugger.sendCommand('Input.dispatchKeyEvent', {
             // Why: rawKeyDown is the no-character form; sending keyDown without text
             // makes Blink synthesize an empty input for editing keys.
