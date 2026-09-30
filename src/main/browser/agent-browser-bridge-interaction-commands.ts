@@ -15,6 +15,7 @@ import { WAIT_PROCESS_TIMEOUT_GRACE_MS } from './agent-browser-bridge-types'
 import { acquireElectronDebugger } from './electron-debugger-lease'
 import { parseCdpKeyEvent, imeFallbackKeyEvent } from './cdp-keyboard-us-layout'
 import { AgentBrowserBridgeCaptureCommands } from './agent-browser-bridge-capture-commands'
+import { requestBrowserGuestKeyboardFocus } from './browser-guest-keyboard-focus'
 
 export abstract class AgentBrowserBridgeInteractionCommands extends AgentBrowserBridgeCaptureCommands {
   async hover(
@@ -167,6 +168,17 @@ export abstract class AgentBrowserBridgeInteractionCommands extends AgentBrowser
     })
   }
 
+  // Why: a key sent to an unfocused guest lands in whatever the Orca window has focused,
+  // usually a terminal, so the agent that ran keypress types into its own PTY.
+  private async focusGuestForKeys(wc: Electron.WebContents, browserPageId: string): Promise<void> {
+    if ((await requestBrowserGuestKeyboardFocus(wc)) === 'not-on-screen') {
+      throw new BrowserError(
+        'browser_error',
+        `Browser page ${browserPageId} is not on screen, so it cannot take keyboard focus. Show it first, e.g. orca tab switch --page ${browserPageId} --focus`
+      )
+    }
+  }
+
   async keypress(
     key: string,
     worktreeId?: string,
@@ -184,7 +196,7 @@ export abstract class AgentBrowserBridgeInteractionCommands extends AgentBrowser
           await this.ensureSession(sessionName, target.browserPageId, target.webContentsId)
           const helperWc = this.getWebContents(target.webContentsId)
           if (helperWc && !helperWc.isDestroyed()) {
-            helperWc.focus()
+            await this.focusGuestForKeys(helperWc, target.browserPageId)
           }
           return (await this.execAgentBrowser(sessionName, ['press', key])) as BrowserKeypressResult
         }
@@ -203,12 +215,10 @@ export abstract class AgentBrowserBridgeInteractionCommands extends AgentBrowser
           modifiers: parsed.modifiers,
           location: parsed.location
         }
+        await this.focusGuestForKeys(wc, target.browserPageId)
         let releaseDebugger = (): void => {}
         try {
           releaseDebugger = acquireElectronDebugger(wc).release
-          // Why: a key sent to an unfocused guest lands in whatever the Orca window has focused,
-          // usually a terminal, so the agent that ran keypress types into its own PTY.
-          wc.focus()
           await wc.debugger.sendCommand('Input.dispatchKeyEvent', {
             // Why: rawKeyDown is the no-character form; sending keyDown without text
             // makes Blink synthesize an empty input for editing keys.
